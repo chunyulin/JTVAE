@@ -1,3 +1,4 @@
+import nvtx
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -38,17 +39,20 @@ class JTNNVAE(nn.Module):
         self.G_mean = nn.Linear(hidden_size, latent_size)
         self.G_var = nn.Linear(hidden_size, latent_size)
 
+    @nvtx.annotate()
     def encode(self, jtenc_holder, mpn_holder):
         tree_vecs, tree_mess = self.jtnn(*jtenc_holder)
         mol_vecs = self.mpn(*mpn_holder)
         return tree_vecs, tree_mess, mol_vecs
     
+    @nvtx.annotate()
     def encode_from_smiles(self, smiles_list):
         tree_batch = [MolTree(s) for s in smiles_list]
         _, jtenc_holder, mpn_holder = tensorize(tree_batch, self.vocab, assm=False)
         tree_vecs, _, mol_vecs = self.encode(jtenc_holder, mpn_holder)
         return torch.cat([tree_vecs, mol_vecs], dim=-1)
 
+    @nvtx.annotate()
     def encode_latent(self, jtenc_holder, mpn_holder):
         tree_vecs, _ = self.jtnn(*jtenc_holder)
         mol_vecs = self.mpn(*mpn_holder)
@@ -58,6 +62,7 @@ class JTNNVAE(nn.Module):
         mol_var = -torch.abs(self.G_var(mol_vecs))
         return torch.cat([tree_mean, mol_mean], dim=1), torch.cat([tree_var, mol_var], dim=1)
 
+    @nvtx.annotate()
     def rsample(self, z_vecs, W_mean, W_var):
         batch_size = z_vecs.size(0)
         z_mean = W_mean(z_vecs)
@@ -72,6 +77,7 @@ class JTNNVAE(nn.Module):
         z_mol = torch.randn(1, self.latent_size).cuda()
         return self.decode(z_tree, z_mol, prob_decode)
 
+    @nvtx.annotate()
     def forward(self, x_batch, beta):
         x_batch, x_jtenc_holder, x_mpn_holder, x_jtmpn_holder = x_batch
         x_tree_vecs, x_tree_mess, x_mol_vecs = self.encode(x_jtenc_holder, x_mpn_holder)
@@ -112,6 +118,7 @@ class JTNNVAE(nn.Module):
         all_loss = sum(all_loss) / len(mol_batch)
         return all_loss, acc * 1.0 / cnt
 
+    @nvtx.annotate()
     def decode(self, x_tree_vecs, x_mol_vecs, prob_decode):
         #TODO: currently do not support batch decoding
         assert x_tree_vecs.size(0) == 1 and x_mol_vecs.size(0) == 1

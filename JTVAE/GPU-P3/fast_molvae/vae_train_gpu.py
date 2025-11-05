@@ -1,3 +1,4 @@
+import nvtx
 import torch
 from functools import reduce
 import operator as op
@@ -89,18 +90,23 @@ parser.add_argument('--num_workers', type=int, default=4)
 args = parser.parse_args()
 print (args)
 
+### STB - DDP related code
+local_rank = 0
+#world_size = 1
+if args.mult_gpus == True:
+    local_rank = int(os.environ["LOCAL_RANK"]) #Environmental variable managed by Pytorch to tell the code which rank the GPU is for this instance
+    torch.cuda.set_device(local_rank)
+    print("Attempting to use more than one GPU: Local rank = ", local_rank)
+
+    init_process_group(backend='nccl')
+    #world_size = dist.get_world_size()
+###
+
+
 #Prepare the vocabulary for the model
 vocab = [x.strip("\r\n ") for x in open(args.vocab)] 
 vocab = Vocab(vocab)
 
-### STB - DDP related code
-if args.mult_gpus == True:
-    print("Attempting to use more than one GPU")
-    local_rank = int(os.environ["LOCAL_RANK"]) #Environmental variable managed by Pytorch to tell the code which rank the GPU is for this instance
-    torch.cuda.set_device(local_rank)
-
-    init_process_group(backend='nccl')
-###
 
 model = JTNNVAE(vocab, args.hidden_size, args.latent_size, args.depthT, args.depthG)
 
@@ -113,7 +119,7 @@ model = model.cuda(device=local_rank)
 if args.mult_gpus == True:
     model = DDP(model, device_ids=[local_rank]) 
 
-print (model)
+if (local_rank==0):  print (model)
 
 for param in model.parameters():
     if param.dim() == 1:
@@ -121,7 +127,8 @@ for param in model.parameters():
     else:
         nn.init.xavier_normal_(param)
 
-print ("Model #Params: %dK" % (sum([x.nelement() for x in model.parameters()]) / 1000,))
+if (local_rank==0):
+    print ("Model #Params: %dK" % (sum([x.nelement() for x in model.parameters()]) / 1000,))
 
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
 scheduler = lr_scheduler.ExponentialLR(optimizer, args.anneal_rate)
@@ -141,12 +148,13 @@ bl_time = 0
 p1_time = 0
 
 for epoch in range(args.load_epoch, args.epoch):
-    shuffle = True
+    shuffle = False
     loader = MolTreeFolder(args.train, vocab, args.batch_size, args.num_workers, shuffle, args.mult_gpus)
-    
-    for batch in loader:
 
-        bl_time = bl_time + time.time() - curr_time
+    for batch in loader:
+      with nvtx.annotate("batch", color="green"):
+
+        bl_time += time.time() - curr_time
         curr_time = time.time()
 
         total_step += 1
@@ -171,22 +179,21 @@ for epoch in range(args.load_epoch, args.epoch):
                 print(''.join(traceback.format_exception(etype=type(e), value=e, tb=e.__traceback__)))
 
             continue
-        
 
-        p1_time = p1_time + time.time() - curr_time
-        curr_time = time.time()
+        p1_time += time.time() - curr_time
+        #curr_time = time.time()   ### seesm redudent !!
 
         meters = meters + np.array([kl_div, wacc * 100, tacc * 100, sacc * 100])
 
         if total_step % args.print_iter == 0:
             meters /= args.print_iter
+            ###--- Why KL is not digitally presearve?
             print ("[%d] Beta: %.3f, KL: %.2f, Word: %.2f, Topo: %.2f, Assm: %.2f, PNorm: %.2f, GNorm: %.2f" % (total_step, beta, meters[0], meters[1], meters[2], meters[3], param_norm(model), grad_norm(model)))
             sys.stdout.flush()
             meters *= 0
 
             time_100 = time.time() - start_time
-            print ('Total time = %.0f seconds' % time_100)
-            print ('Batch processing time, model training time = %.0f, %.0f seconds' % (bl_time, p1_time))
+            print ('[%d] Time = %.1f s   (Batch proc= %.1f, training= %.1f s)' % (total_step, time_100, bl_time, p1_time))
 
 #Below code is commented out 
 #JI        if total_step % args.save_iter == 0:
@@ -201,6 +208,10 @@ for epoch in range(args.load_epoch, args.epoch):
 #JI         beta = min(args.max_beta, beta + args.step_beta)
 
         curr_time = time.time()
+
+
+        ### For debug...
+        if (total_step == 10): break
         
 
     cur_lr = scheduler.get_last_lr()[0]

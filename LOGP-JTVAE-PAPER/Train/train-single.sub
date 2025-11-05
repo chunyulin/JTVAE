@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH -A GOV113080
+#SBATCH --job-name=jtvae-train2
+#SBATCH --partition=nchc
+#SBATCH --gres=gpu:2
+#SBATCH --nodes=1 --ntasks-per-node=1 --cpus-per-task=10
+###SBATCH --time=0:30:00
+
+export MASTER_PORT=$((2000+ RANDOM%63536 ))
+
+srun hostname
+srun bash ./torchrun_quantum.sh
+
+echo "=== Done in ${SECONDS} sec."

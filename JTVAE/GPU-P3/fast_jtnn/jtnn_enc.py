@@ -1,3 +1,4 @@
+import nvtx
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,6 +20,7 @@ class JTNNEncoder(nn.Module):
         )
         self.GRU = GraphGRU(hidden_size, hidden_size, depth=depth)
 
+    @nvtx.annotate()
     def forward(self, fnode, fmess, node_graph, mess_graph, scope):
         fnode = create_var(fnode)
         fmess = create_var(fmess)
@@ -111,6 +113,7 @@ class GraphGRU(nn.Module):
         self.U_r = nn.Linear(hidden_size, hidden_size)
         self.W_h = nn.Linear(input_size + hidden_size, hidden_size)
 
+    @nvtx.annotate()
     def forward(self, h, x, mess_graph):
 
         mask = torch.ones(h.size(0), 1)

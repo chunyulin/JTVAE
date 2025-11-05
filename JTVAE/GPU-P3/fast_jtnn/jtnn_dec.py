@@ -1,3 +1,4 @@
+import nvtx
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -42,6 +43,8 @@ class JTNNDecoder(nn.Module):
 #JI     self.pred_loss = nn.CrossEntropyLoss(size_average=False)
 #JI     self.stop_loss = nn.BCEWithLogitsLoss(size_average=False)
 
+
+    @nvtx.annotate()
     def aggregate(self, hiddens, contexts, x_tree_vecs, mode):
         if mode == 'word':
             V, V_o = self.W, self.W_o
@@ -55,6 +58,7 @@ class JTNNDecoder(nn.Module):
         output_vec = F.relu( V(input_vec) )
         return V_o(output_vec)
 
+    @nvtx.annotate()
     def forward(self, mol_batch, x_tree_vecs):
         pred_hiddens,pred_contexts,pred_targets = [],[],[]
         stop_hiddens,stop_contexts,stop_targets = [],[],[]
@@ -202,6 +206,7 @@ class JTNNDecoder(nn.Module):
 
         return pred_loss, stop_loss, pred_acc.item(), stop_acc.item()
     
+    @nvtx.annotate()
     def decode(self, x_tree_vecs, prob_decode):
         assert x_tree_vecs.size(0) == 1
 
