@@ -6,12 +6,13 @@ from fast_jtnn.nnutils import *
 from fast_jtnn.chemutils import get_mol
 
 ELEM_LIST = ["C", "N", "O", "S", "F", "Si", "P", "Cl", "Br", "Mg", "Na", "Ca", "Fe", "Al", "I", "B", "K", "Se", "Zn", "H", "Cu", "Mn", "unknown",]
+## len(ELEM_LIST) = 23
 
-ATOM_FDIM = len(ELEM_LIST) + 6 + 5 + 4 + 1
+ATOM_FDIM = len(ELEM_LIST) + 6 + 5 + 4 + 1   ## = 39
 BOND_FDIM = 5 + 6
 MAX_NB = 6
 
-def onek_encoding_unk(x, allowable_set):
+def onek_encoding_unk(x, allowable_set):  # One-K encoding with an Unknown category
     if x not in allowable_set:
         x = allowable_set[-1]
     return [x == s for s in allowable_set]

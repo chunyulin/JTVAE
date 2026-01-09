@@ -6,7 +6,7 @@ from collections import deque
 from fast_jtnn.mol_tree import Vocab, MolTree
 from fast_jtnn.nnutils import create_var, index_select_ND, index_select_sum
 
-class JTNNEncoder(nn.Module):
+class JTNNEncoder(nn.Module):    ### tree encoder
 
     def __init__(self, hidden_size, depth, embedding):
         super(JTNNEncoder, self).__init__()
@@ -20,7 +20,7 @@ class JTNNEncoder(nn.Module):
         )
         self.GRU = GraphGRU(hidden_size, hidden_size, depth=depth)
 
-    @nvtx.annotate()
+    @nvtx.annotate("ENC:forward")
     def forward(self, fnode, fmess, node_graph, mess_graph, scope):
         fnode = create_var(fnode)
         fmess = create_var(fmess)
@@ -37,15 +37,15 @@ class JTNNEncoder(nn.Module):
         #mess_nei = index_select_ND(messages, 0, node_graph) #remove
         #node_vecs = torch.cat([fnode, mess_nei.sum(dim=1)], dim=-1) #remove
         mess_nei = index_select_sum(messages, 0, node_graph)
-        node_vecs = torch.cat([fnode, mess_nei], dim=-1)
+        node_vecs = torch.cat([fnode, mess_nei], dim=-1)   # combines the node features with the nei-messages.
         ###
 
         node_vecs = self.outputNN(node_vecs)
 
         max_len = max([x for _,x in scope])
         batch_vecs = []
-        for st,le in scope:
-            cur_vecs = node_vecs[st] #Root is the first node
+        for st,le in scope:   ## start/length
+            cur_vecs = node_vecs[st] # the "Root" of the melecular
             batch_vecs.append( cur_vecs )
 
         tree_vecs = torch.stack(batch_vecs, dim=0)
@@ -53,7 +53,7 @@ class JTNNEncoder(nn.Module):
 
     @staticmethod
     def tensorize(tree_batch):
-        node_batch = [] 
+        node_batch = []
         scope = []
         for tree in tree_batch:
             scope.append( (len(node_batch), len(tree.nodes)) )
@@ -94,10 +94,11 @@ class JTNNEncoder(nn.Module):
             pad_len = max_len - len(t)
             t.extend([0] * pad_len)
 
-        mess_graph = torch.LongTensor(mess_graph)
-        node_graph = torch.LongTensor(node_graph)
-        fmess = torch.LongTensor(fmess)
-        fnode = torch.LongTensor(fnode)
+        mess_graph = torch.LongTensor(mess_graph)  # Message-to-Message Mapping: An indexing tensor used for the message passing update.
+        node_graph = torch.LongTensor(node_graph)  # Node-to-Message Mapping: to aggregate incoming messages.
+        fmess = torch.LongTensor(fmess)            # message (directed edge) features: (total_messages, message_fdim)
+        fnode = torch.LongTensor(fnode)            # node feature: (total_nodes, node_fdim)
+        # return tuple of tensors and a dictionary, for the irregular connectivity of graphs in a batch
         return (fnode, fmess, node_graph, mess_graph, scope), mess_dict
 
 class GraphGRU(nn.Module):

@@ -1,4 +1,5 @@
 import nvtx
+#from torch.profiler import profile, ProfilerActivity
 import torch
 from functools import reduce
 import operator as op
@@ -87,6 +88,8 @@ parser.add_argument("--debug", default=False, action='store_true')
 #JI-Add - Default number of workers = 4
 parser.add_argument('--num_workers', type=int, default=4)
 
+parser.add_argument('--use_amp', default=False, action='store_true')
+
 args = parser.parse_args()
 print (args)
 
@@ -147,6 +150,17 @@ curr_time = time.time()
 bl_time = 0
 p1_time = 0
 
+#===========================
+
+use_amp = args.use_amp
+scaler = torch.amp.GradScaler("cuda" ,enabled=use_amp)
+print ("Use mixed-presicion training: ", use_amp)
+
+#schedule = torch.profiler.schedule(wait=1, warmup=0, active=2, repeat=1)
+#activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
+#with profile(activities=activities, schedule=schedule,
+#  profile_memory=True, record_shapes=True) as prof:
+
 for epoch in range(args.load_epoch, args.epoch):
     shuffle = False
     loader = MolTreeFolder(args.train, vocab, args.batch_size, args.num_workers, shuffle, args.mult_gpus)
@@ -160,16 +174,20 @@ for epoch in range(args.load_epoch, args.epoch):
         total_step += 1
 
         try:
-            model.zero_grad()
-            if epoch < args.warmup:
-               loss, kl_div, wacc, tacc, sacc = model(batch, beta0)
+              model.zero_grad()
+              if epoch < args.warmup:
+                 with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+                   loss, kl_div, wacc, tacc, sacc = model(batch, beta0)
+              else:
+                 with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+                   loss, kl_div, wacc, tacc, sacc = model(batch, beta)
 
-            else:
-               loss, kl_div, wacc, tacc, sacc = model(batch, beta)
-
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
-            optimizer.step()
+              scaler.scale(loss).backward()
+              scaler.unscale_(optimizer)
+              nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
+              scaler.step(optimizer)
+              scaler.update()
+              #optimizer.zero_grad(set_to_none=True)   ##here can modestly improve performance
 
         except Exception as e:
             print("STB train EXCEPTION") #STB: TEMP
@@ -185,6 +203,8 @@ for epoch in range(args.load_epoch, args.epoch):
 
         meters = meters + np.array([kl_div, wacc * 100, tacc * 100, sacc * 100])
 
+        #prof.step()
+
         if total_step % args.print_iter == 0:
             meters /= args.print_iter
             ###--- Why KL is not digitally presearve?
@@ -194,6 +214,10 @@ for epoch in range(args.load_epoch, args.epoch):
 
             time_100 = time.time() - start_time
             print ('[%d] Time = %.1f s   (Batch proc= %.1f, training= %.1f s)' % (total_step, time_100, bl_time, p1_time))
+
+            allo_mem = torch.cuda.memory_allocated() / (1024**2)
+            rese_mem = torch.cuda.memory_reserved() / (1024**2)
+            print(f"    GPU allo / researved memory: {allo_mem:.3f} / {rese_mem:.3f} MB")
 
 #Below code is commented out 
 #JI        if total_step % args.save_iter == 0:
@@ -210,9 +234,9 @@ for epoch in range(args.load_epoch, args.epoch):
         curr_time = time.time()
 
 
-        ### For debug...
-        if (total_step == 10): break
-        
+        ### reduce the number for quick testing...
+        if (total_step >= 99999): break
+
 
     cur_lr = scheduler.get_last_lr()[0]
     print ("Current learning rate: %.6f" % cur_lr)

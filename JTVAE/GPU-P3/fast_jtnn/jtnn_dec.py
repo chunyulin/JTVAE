@@ -44,7 +44,6 @@ class JTNNDecoder(nn.Module):
 #JI     self.stop_loss = nn.BCEWithLogitsLoss(size_average=False)
 
 
-    @nvtx.annotate()
     def aggregate(self, hiddens, contexts, x_tree_vecs, mode):
         if mode == 'word':
             V, V_o = self.W, self.W_o
@@ -58,12 +57,14 @@ class JTNNDecoder(nn.Module):
         output_vec = F.relu( V(input_vec) )
         return V_o(output_vec)
 
-    @nvtx.annotate()
+    @nvtx.annotate("DEC:forward")
     def forward(self, mol_batch, x_tree_vecs):
         pred_hiddens,pred_contexts,pred_targets = [],[],[]
         stop_hiddens,stop_contexts,stop_targets = [],[],[]
         traces = []
         for mol_tree in mol_batch:
+            #print("---", mol_tree.smiles)
+            #print([ nnn.idx for nnn in mol_tree.nodes ])
             s = []
             dfs(s, mol_tree.nodes[0], -1)
             traces.append(s)
@@ -72,15 +73,14 @@ class JTNNDecoder(nn.Module):
 
         #Predict Root
         batch_size = len(mol_batch)
-        pred_hiddens.append(create_var(torch.zeros(len(mol_batch),self.hidden_size)))
+        pred_hiddens.append(create_var(torch.zeros(len(mol_batch), self.hidden_size)))
         pred_targets.extend([mol_tree.nodes[0].wid for mol_tree in mol_batch])
         pred_contexts.append( create_var( torch.LongTensor(range(batch_size)) ) )
-        
+
         max_iter = max([len(tr) for tr in traces])
         padding = create_var(torch.zeros(self.hidden_size), False)
         h = {}
 
-        
         for t in range(max_iter):
             prop_list = []
             batch_list = []
@@ -92,7 +92,7 @@ class JTNNDecoder(nn.Module):
             cur_x = []
             cur_h_nei,cur_o_nei = [],[]
 
-            padding_save = copy.deepcopy(padding) #STB - DEBUG
+            #padding_save = copy.deepcopy(padding) #STB - DEBUG
 
             for node_x, real_y, _ in prop_list:
                 #Neighbors for message passing (target not included)
@@ -115,7 +115,7 @@ class JTNNDecoder(nn.Module):
                 cur_x.append(node_x.wid)
                 
                 #print("Has Padding Changed? ", torch.eq(padding, padding_save), " has length of padding changed? ", len(padding) == len(padding_save))
-                padding_save = copy.deepcopy(padding) #STB - DEBUG
+                #padding_save = copy.deepcopy(padding) #STB - DEBUG
 
             #Clique embedding
             cur_x = create_var(torch.LongTensor(cur_x))
@@ -206,7 +206,7 @@ class JTNNDecoder(nn.Module):
 
         return pred_loss, stop_loss, pred_acc.item(), stop_acc.item()
     
-    @nvtx.annotate()
+    @nvtx.annotate("DEC:decode")
     def decode(self, x_tree_vecs, prob_decode):
         assert x_tree_vecs.size(0) == 1
 

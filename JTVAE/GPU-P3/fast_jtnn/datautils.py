@@ -89,11 +89,10 @@ class MolTreeFolder(object):
             fn = os.path.join(self.data_folder, fn)
             with open(fn, 'rb') as f:
                 data = pickle.load(f)   ### a list of MolTreeObject
+                print(f"======== G:{int(os.environ['LOCAL_RANK'])}    Loading {fn} with {len(data)} data")
 
             if self.shuffle:
                 random.shuffle(data) #shuffle data before batch
-
-            print(f"G:{int(os.environ['LOCAL_RANK'])}  Processing {fn} having {len(data)} data ...")
 
             ##print("LDATA(100): ", len(data))  ##CY# First file has 57 
             batches = [data[i : i + self.batch_size] for i in range(0, len(data), self.batch_size)]
